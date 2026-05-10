@@ -1,0 +1,30 @@
+# 本地配置与密钥（勿提交）
+config.yaml
+.env
+.env.*
+!.env.example
+
+# SQLite 与本地数据
+*.db
+*.db-shm
+*.db-wal
+/app/data/
+
+# 构建产物
+/orsync
+/bin/
+dist/
+*.exe
+*.test
+*.out
+coverage.out
+
+# Go
+vendor/
+
+# IDE 与系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

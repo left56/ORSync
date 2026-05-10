@@ -1,0 +1,27 @@
+# ORSync 编排示例：
+# 1. 复制 config.example.yaml 为 config.yaml 并填写真实值；或将下方 environment 改为你的环境变量。
+# 2. docker compose up -d --build
+#
+# 默认从挂载的 ./config.yaml 读取；DATABASE_PATH 指向命名卷中的 SQLite 文件。
+
+services:
+  orsync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: orsync:latest
+    restart: unless-stopped
+    ports:
+      - "${ORSYNC_PORT:-8080}:8080"
+    working_dir: /app
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - orsync-data:/app/data
+    environment:
+      SERVER_ADDR: ":8080"
+      DATABASE_PATH: /app/data/orsync.db
+      # 显式指定挂载的配置文件（与 volumes 中路径一致即可）
+      ORSYNC_CONFIG_FILE: /app/config.yaml
+
+volumes:
+  orsync-data:
