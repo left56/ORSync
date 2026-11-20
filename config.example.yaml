@@ -14,6 +14,12 @@ database:
 outline:
   base_url: "https://your-outline-host.example.com"
   api_key: "ol_api_replace_me"
+  # 可选：仅同步指定名称的文档集（不区分大小写）；可写多个。留空或不写则同步工作区内全部可见文档。
+  # 启动时会调用 Outline API 将名称解析为 collection id；若有名称无法匹配则进程退出。
+  # 说明：按文档集列举时行为与 Outline 一致，部分排序下子文档可能不在列表中；若遇漏同步可改用「不限制文档集」全库同步或调整 Outline 侧结构。
+  # collection_names:
+  #   - "产品文档"
+  #   - "Engineering Handbook"
 
 ragflow:
   base_url: "http://127.0.0.1:9380"

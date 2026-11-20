@@ -30,6 +30,8 @@ type DatabaseConfig struct {
 type OutlineConfig struct {
 	BaseURL string `mapstructure:"base_url"`
 	APIKey  string `mapstructure:"api_key"`
+	// CollectionNames 非空时，仅同步名称匹配的 Outline 文档集（不区分大小写）；空则同步工作区内全部可见文档。
+	CollectionNames []string `mapstructure:"collection_names"`
 }
 
 type RAGFlowConfig struct {
@@ -114,6 +116,8 @@ func Load(configFile string) (Config, error) {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	mergeOutlineCollectionNamesFromFlatEnv(v, &cfg)
+
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
@@ -150,6 +154,27 @@ func (c Config) validate() error {
 }
 
 // liftFlatKeys 在嵌套键为空时，用大写扁平键填充（兼容 config.yaml 嵌套 + .env 扁平混用）。
+// mergeOutlineCollectionNamesFromFlatEnv 当未配置 YAML 数组时，支持用 OUTLINE_COLLECTION_NAMES="知识库A,团队手册" 形式注入（含 viper 合并的 .env）。
+func mergeOutlineCollectionNamesFromFlatEnv(v *viper.Viper, cfg *Config) {
+	if len(cfg.Outline.CollectionNames) > 0 {
+		return
+	}
+	raw := strings.TrimSpace(v.GetString("OUTLINE_COLLECTION_NAMES"))
+	if raw == "" {
+		return
+	}
+	parts := strings.Split(raw, ",")
+	var names []string
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			names = append(names, t)
+		}
+	}
+	if len(names) > 0 {
+		cfg.Outline.CollectionNames = names
+	}
+}
+
 func liftFlatKeys(v *viper.Viper) {
 	lifts := []struct {
 		nested, flat string

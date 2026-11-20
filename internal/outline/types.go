@@ -7,6 +7,8 @@ type DocumentsListRequest struct {
 	Limit     int    `json:"limit,omitempty"`
 	Sort      string `json:"sort,omitempty"`      // 例如 updatedAt、createdAt、index
 	Direction string `json:"direction,omitempty"` // ASC 或 DESC
+	// CollectionID 非空时仅列出该文档集内的已发布文档（及属于当前用户的草稿等，行为与 Outline 一致）。
+	CollectionID string `json:"collectionId,omitempty"`
 }
 
 // DocumentsListResponse 为 documents.list 的顶层 JSON。
@@ -47,8 +49,9 @@ type DocumentsInfoResponse struct {
 
 // DocumentDetail 为 documents.info 返回的 data（含 Markdown 原文 text）。
 type DocumentDetail struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	URL   string `json:"url"`
-	Text  string `json:"text"`
+	ID           string `json:"id"`
+	CollectionID string `json:"collectionId"`
+	Title        string `json:"title"`
+	URL          string `json:"url"`
+	Text         string `json:"text"`
 }

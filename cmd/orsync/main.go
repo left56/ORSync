@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	httpShutdownTimeout   = 5 * time.Second
-	backgroundWaitTimeout = 30 * time.Minute
-	logCleanerExitTimeout = 5 * time.Second
+	httpShutdownTimeout          = 5 * time.Second
+	backgroundWaitTimeout        = 30 * time.Minute
+	logCleanerExitTimeout        = 5 * time.Second
+	resolveOutlineCollectionsTTL = 2 * time.Minute
 )
 
 func main() {
@@ -70,13 +71,28 @@ func main() {
 	}
 	zap.L().Info("outline_client_ready")
 
+	var outlineCollectionIDs []string
+	if want := outline.NormalizeCollectionNameList(cfg.Outline.CollectionNames); len(want) > 0 {
+		resolveCtx, cancelResolve := context.WithTimeout(context.Background(), resolveOutlineCollectionsTTL)
+		ids, err := outline.ResolveCollectionNamesToIDs(resolveCtx, oc, want)
+		cancelResolve()
+		if err != nil {
+			zap.L().Fatal("outline_resolve_collection_names_failed", zap.Strings("collection_names", want), zap.Error(err))
+		}
+		outlineCollectionIDs = ids
+		zap.L().Info("outline_collection_filter_enabled",
+			zap.Strings("collection_names", want),
+			zap.Strings("collection_ids", outlineCollectionIDs),
+		)
+	}
+
 	rc, err := ragflow.NewClient(httpClient, cfg.RAGFlow.BaseURL, cfg.RAGFlow.APIKey, cfg.RAGFlow.DatasetID)
 	if err != nil {
 		zap.L().Fatal("ragflow_client_failed", zap.Error(err))
 	}
 	zap.L().Info("ragflow_client_ready")
 
-	syncSvc, err := service.NewSyncService(oc, rc, db)
+	syncSvc, err := service.NewSyncService(oc, rc, db, outlineCollectionIDs)
 	if err != nil {
 		zap.L().Fatal("sync_service_failed", zap.Error(err))
 	}

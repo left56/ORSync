@@ -39,7 +39,8 @@ func NewClient(httpClient *http.Client, baseURL, apiKey string) (*Client, error)
 }
 
 // ListDocuments 调用 POST /api/documents.list，返回当前页的文档摘要与分页信息。
-func (c *Client) ListDocuments(ctx context.Context, offset, limit int) (DocumentsListResponse, error) {
+// collectionID 为空表示不按文档集过滤（列出工作区内可见文档）；非空时仅列出该文档集内文档。
+func (c *Client) ListDocuments(ctx context.Context, offset, limit int, collectionID string) (DocumentsListResponse, error) {
 	if limit <= 0 {
 		return DocumentsListResponse{}, fmt.Errorf("outline: limit must be > 0")
 	}
@@ -47,8 +48,9 @@ func (c *Client) ListDocuments(ctx context.Context, offset, limit int) (Document
 		return DocumentsListResponse{}, fmt.Errorf("outline: offset must be >= 0")
 	}
 	reqBody := DocumentsListRequest{
-		Offset: offset,
-		Limit:  limit,
+		Offset:       offset,
+		Limit:        limit,
+		CollectionID: strings.TrimSpace(collectionID),
 	}
 	var out DocumentsListResponse
 	if err := c.postJSON(ctx, "/api/documents.list", reqBody, &out); err != nil {
@@ -62,10 +64,11 @@ func (c *Client) ListDocuments(ctx context.Context, offset, limit int) (Document
 
 // DocumentView 为 GetDocument 返回的视图：元数据 + Markdown 正文。
 type DocumentView struct {
-	ID    string
-	Title string
-	URL   string
-	Text  string
+	ID           string
+	CollectionID string
+	Title        string
+	URL          string
+	Text         string
 }
 
 // GetDocument 调用 POST /api/documents.info，返回标题、URL 与 Markdown 原文（text）。
@@ -83,10 +86,11 @@ func (c *Client) GetDocument(ctx context.Context, id string) (DocumentView, erro
 		return DocumentView{}, fmt.Errorf("outline documents.info: %s", outlineErrMsg(out.Error))
 	}
 	return DocumentView{
-		ID:    out.Data.ID,
-		Title: out.Data.Title,
-		URL:   out.Data.URL,
-		Text:  out.Data.Text,
+		ID:           out.Data.ID,
+		CollectionID: out.Data.CollectionID,
+		Title:        out.Data.Title,
+		URL:          out.Data.URL,
+		Text:         out.Data.Text,
 	}, nil
 }
 

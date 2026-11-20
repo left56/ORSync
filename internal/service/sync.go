@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,10 @@ type SyncService struct {
 	db       *store.DB
 	pageSize int
 
+	// allowedOutlineCollectionIDs 非空时仅同步这些 Outline collectionId（已排序）；Webhook 写路径亦按 collection 校验。
+	allowedOutlineCollectionIDs []string
+	allowedOutlineCollectionSet map[string]struct{}
+
 	fullMu      sync.Mutex
 	fullRunning bool
 
@@ -30,7 +35,8 @@ type SyncService struct {
 }
 
 // NewSyncService 注入 Outline / RAGFlow 客户端与 SQLite 包装器。
-func NewSyncService(oc *outline.Client, rc *ragflow.Client, db *store.DB) (*SyncService, error) {
+// allowedOutlineCollectionIDs 非空时启用文档集白名单（值为 Outline 的 collection UUID）；nil 或空切片表示不限制。
+func NewSyncService(oc *outline.Client, rc *ragflow.Client, db *store.DB, allowedOutlineCollectionIDs []string) (*SyncService, error) {
 	if oc == nil {
 		return nil, fmt.Errorf("service: outline client is nil")
 	}
@@ -40,24 +46,62 @@ func NewSyncService(oc *outline.Client, rc *ragflow.Client, db *store.DB) (*Sync
 	if db == nil {
 		return nil, fmt.Errorf("service: store db is nil")
 	}
+	set := make(map[string]struct{})
+	var ids []string
+	for _, id := range allowedOutlineCollectionIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := set[id]; ok {
+			continue
+		}
+		set[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var allowSet map[string]struct{}
+	if len(ids) > 0 {
+		allowSet = set
+	}
 	return &SyncService{
-		outline:  oc,
-		ragflow:  rc,
-		db:       db,
-		pageSize: defaultListPageSize,
+		outline:                     oc,
+		ragflow:                     rc,
+		db:                          db,
+		pageSize:                    defaultListPageSize,
+		allowedOutlineCollectionIDs: ids,
+		allowedOutlineCollectionSet: allowSet,
 	}, nil
 }
 
-// FullSync 遍历 Outline 全库，将每篇文档同步至 RAGFlow 并维护 sync_mapping；每篇写入 sync_logs（event_type: full_sync）。
+// FullSync 遍历 Outline 文档（若配置了文档集白名单则仅遍历这些文档集），将每篇文档同步至 RAGFlow 并维护 sync_mapping；每篇写入 sync_logs（event_type: full_sync）。
 func (s *SyncService) FullSync(ctx context.Context) error {
+	if len(s.allowedOutlineCollectionIDs) == 0 {
+		return s.fullSyncListWithOptionalCollection(ctx, "")
+	}
+	for _, cid := range s.allowedOutlineCollectionIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.fullSyncListWithOptionalCollection(ctx, cid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SyncService) fullSyncListWithOptionalCollection(ctx context.Context, collectionID string) error {
 	offset := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		list, err := s.outline.ListDocuments(ctx, offset, s.pageSize)
+		list, err := s.outline.ListDocuments(ctx, offset, s.pageSize, collectionID)
 		if err != nil {
-			return fmt.Errorf("full sync: list documents at offset %d: %w", offset, err)
+			if collectionID == "" {
+				return fmt.Errorf("full sync: list documents at offset %d: %w", offset, err)
+			}
+			return fmt.Errorf("full sync: list documents in collection %s at offset %d: %w", collectionID, offset, err)
 		}
 		if len(list.Data) == 0 {
 			break
@@ -206,6 +250,11 @@ func (s *SyncService) syncOneFromOutline(ctx context.Context, outlineDocID, logE
 		s.logSync(ctx, logEventType, outlineDocID, "failed", fmt.Sprintf("outline get document: %v", err))
 		return fmt.Errorf("outline get document: %w", err)
 	}
+	if !s.isOutlineCollectionAllowed(doc.CollectionID) {
+		msg := fmt.Sprintf("skipped: document collection_id=%q not in configured Outline collection allowlist", strings.TrimSpace(doc.CollectionID))
+		s.logSync(ctx, logEventType, outlineDocID, "success", msg)
+		return nil
+	}
 	md := []byte(doc.Text)
 	m, err := s.db.FindMappingByOutline(ctx, outlineDocID)
 	if err != nil {
@@ -230,6 +279,15 @@ func (s *SyncService) syncOneFromOutline(ctx context.Context, outlineDocID, logE
 	}
 	s.logSync(ctx, logEventType, outlineDocID, "success", fmt.Sprintf("ragflow_doc_id=%s", up.ID))
 	return nil
+}
+
+func (s *SyncService) isOutlineCollectionAllowed(collectionID string) bool {
+	if s.allowedOutlineCollectionSet == nil {
+		return true
+	}
+	collectionID = strings.TrimSpace(collectionID)
+	_, ok := s.allowedOutlineCollectionSet[collectionID]
+	return ok
 }
 
 func (s *SyncService) logSync(ctx context.Context, eventType, targetDocID, status, message string) {
